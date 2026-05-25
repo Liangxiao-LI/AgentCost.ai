@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /Users/leon/Documents/GitHub/AgentCost.ai status)",
+      "Bash(git -C /Users/leon/Documents/GitHub/AgentCost.ai diff token-count-demo/.env.example)",
+      "Bash(git -C /Users/leon/Documents/GitHub/AgentCost.ai restore token-count-demo/.env.example)"
+    ]
+  }
+}
