@@ -1,12 +1,12 @@
-"""Database write operations for all logging tables.
+"""Database write operations for every logging event in the agent lifecycle.
 
-Every public function here corresponds to one write event in the agent lifecycle:
-  create_run / finish_run        → agent_runs
-  log_model_call                 → model_calls
-  create_tool_call_row           → tool_calls (initial insert, status=running)
-  finish_tool_call_row           → tool_calls (update with result)
-  update_tool_call_consumed_by   → tool_calls (back-fill consumed_by_model_call_id)
-  get_or_create_agent_config     → agent_configs
+One public function per write event:
+  get_or_create_agent_config   → agent_configs
+  create_run / finish_run      → agent_runs
+  log_model_call               → model_calls
+  create_tool_call_row         → tool_calls  (initial insert, status pending)
+  finish_tool_call_row         → tool_calls  (update with result)
+  update_tool_call_consumed_by → tool_calls  (back-fill consumed_by_model_call_id)
 """
 
 import hashlib
@@ -21,32 +21,32 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def hash_text(text: str) -> str:
+def _hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
-# ── agent_configs ────────────────────────────────────────────────────────────
+# ── agent_configs ─────────────────────────────────────────────────────────────
 
 def get_or_create_agent_config(
     config: dict,
     tool_registry_hash: str,
     system_prompt_hash: str,
 ) -> str:
-    """Return existing agent_config_id if this exact config was seen before, else insert."""
-    agent = config["agent"]
-    model = agent["model"]
+    """Return the existing agent_config_id if this exact config has been seen, else insert."""
+    model = config["agent"]["model"]
     conn = get_connection()
     row = conn.execute(
         """SELECT agent_config_id FROM agent_configs
-           WHERE tool_registry_hash = ? AND system_prompt_hash = ? AND model = ?""",
-        (tool_registry_hash, system_prompt_hash, model),
+           WHERE model = ? AND tool_registry_hash = ? AND system_prompt_hash = ?""",
+        (model, tool_registry_hash, system_prompt_hash),
     ).fetchone()
     if row:
         conn.close()
         return row["agent_config_id"]
 
     config_id = str(uuid.uuid4())
-    truncation = config.get("truncation", {})
+    agent = config["agent"]
+    truncation_chars = config.get("truncation", {}).get("tool_result_max_chars", 4000)
     with conn:
         conn.execute(
             """INSERT INTO agent_configs
@@ -61,8 +61,8 @@ def get_or_create_agent_config(
                 system_prompt_hash,
                 tool_registry_hash,
                 agent.get("temperature", 0),
-                agent.get("max_tool_calls", 3),
-                truncation.get("tool_result_max_chars", 4000),
+                agent.get("max_tool_calls", 5),
+                truncation_chars,
                 _now(),
             ),
         )
@@ -70,7 +70,7 @@ def get_or_create_agent_config(
     return config_id
 
 
-# ── agent_runs ───────────────────────────────────────────────────────────────
+# ── agent_runs ────────────────────────────────────────────────────────────────
 
 def create_run(
     run_id: str,
@@ -92,7 +92,7 @@ def create_run(
                 run_id,
                 trace_id,
                 agent_config_id,
-                hash_text(user_prompt),
+                _hash(user_prompt),
                 user_prompt_tokens,
                 json.dumps(tools_exposed),
                 source,
@@ -141,7 +141,7 @@ def finish_run(
     conn.close()
 
 
-# ── model_calls ──────────────────────────────────────────────────────────────
+# ── model_calls ───────────────────────────────────────────────────────────────
 
 def log_model_call(
     model_call_id: str,
@@ -151,7 +151,8 @@ def log_model_call(
     model: str,
     input_tokens: int,
     output_tokens: int,
-    cached_input_tokens: int,
+    cache_read_input_tokens: int,
+    cache_write_input_tokens: int,
     tool_schema_tokens: int,
     tool_result_tokens_inserted: int,
     finish_reason: str,
@@ -163,31 +164,23 @@ def log_model_call(
         conn.execute(
             """INSERT INTO model_calls
                (model_call_id, trace_id, run_id, call_index, model,
-                input_tokens, output_tokens, cached_input_tokens,
+                input_tokens, output_tokens,
+                cache_read_input_tokens, cache_write_input_tokens,
                 tool_schema_tokens, tool_result_tokens_inserted,
                 finish_reason, cost_usd, latency_ms, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                model_call_id,
-                trace_id,
-                run_id,
-                call_index,
-                model,
-                input_tokens,
-                output_tokens,
-                cached_input_tokens,
-                tool_schema_tokens,
-                tool_result_tokens_inserted,
-                finish_reason,
-                cost_usd,
-                latency_ms,
-                _now(),
+                model_call_id, trace_id, run_id, call_index, model,
+                input_tokens, output_tokens,
+                cache_read_input_tokens, cache_write_input_tokens,
+                tool_schema_tokens, tool_result_tokens_inserted,
+                finish_reason, cost_usd, latency_ms, _now(),
             ),
         )
     conn.close()
 
 
-# ── tool_calls ───────────────────────────────────────────────────────────────
+# ── tool_calls ────────────────────────────────────────────────────────────────
 
 def create_tool_call_row(
     call_id: str,
@@ -206,16 +199,8 @@ def create_tool_call_row(
                 call_index, tool_name, tool_type, arguments_json,
                 success, created_at)
                VALUES (?, ?, ?, ?, ?, ?, 'function', ?, 0, ?)""",
-            (
-                call_id,
-                trace_id,
-                run_id,
-                triggered_by_model_call_id,
-                call_index,
-                tool_name,
-                arguments_json,
-                _now(),
-            ),
+            (call_id, trace_id, run_id, triggered_by_model_call_id,
+             call_index, tool_name, arguments_json, _now()),
         )
     conn.close()
 

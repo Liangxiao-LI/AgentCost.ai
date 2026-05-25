@@ -203,13 +203,16 @@ After this first configuration, synthetic task generation and batch execution ca
 
 ### Example `agent_config.yaml`
 
+The first target runtime is Claude Code (see [Claude Code as the First Target Runtime](#claude-code-as-the-first-target-runtime)).
+
 ```yaml
 agent:
   agent_version: "mvp-0.1"
-  model: "gpt-4o-mini"
+  provider: "anthropic"              # "anthropic" | "openai"
+  model: "claude-haiku-4-5-20251001" # cheap for batch logging; switch to claude-sonnet-4-6 for production profiling
   system_prompt: "You are a helpful assistant. Use tools only when necessary."
   temperature: 0
-  max_tool_calls: 3
+  max_tool_calls: 5
 
 tools:
   - name: "web_search"
@@ -217,14 +220,14 @@ tools:
     description: "Search the web for current or external information."
   - name: "calculator"
     enabled: true
-    description: "Perform arithmetic calculations."
+    description: "Evaluate arithmetic expressions."
 
 truncation:
-  tool_result_max_tokens: 1200
+  tool_result_max_chars: 4000
 
 budget:
   max_task_cost_usd_p90: 0.02
-  max_batch_cost_usd: 1.00
+  max_batch_cost_usd: 2.00
 
 privacy:
   mode: "synthetic_only"
@@ -233,6 +236,168 @@ privacy:
 ### Config Versioning
 
 Changing system prompt, tool schema, model, temperature, or truncation policy must create a new `agent_config_id`. The `tool_registry_hash` (SHA-256 of all enabled tool schemas) and `system_prompt_hash` both change, and the old `agent_config_id` is closed. Training data from different configs must never be mixed without tracking the config — the training signal becomes contradictory.
+
+---
+
+## Claude Code as the First Target Runtime
+
+The first target agent runtime is **Claude Code**, because this is the agent the founder already uses most.
+
+Agent Cost Forecaster should not build its own agent runtime in Milestone 1. Instead, it should instrument Claude API execution — the same model calls that Claude Code makes.
+
+```text
+Milestone 1 should observe Claude Code, not replace Claude Code.
+```
+
+### What "Instrumenting Claude Code" Means
+
+Claude Code is a CLI tool that:
+
+1. Sends prompts to Claude models via the Anthropic API
+2. Executes tools through MCP servers or built-in tools
+3. Returns responses to the user
+
+Instrumenting it means:
+
+- Using the **Anthropic Python SDK** to call the same Claude models Claude Code uses
+- Routing all tool calls through the `observed_tool_call` wrapper before execution
+- Logging every `messages.create()` call: input tokens, output tokens, cache tokens, cost
+- Logging every tool call: arguments, result, source URLs, latency, tokens inserted
+
+The executor does not try to replicate Claude Code's full feature set. It replicates the **observable API surface** — model calls and tool calls — with the same models and tools.
+
+### Why Not Build a Custom Agent Runtime in Milestone 1
+
+Building a custom agent runtime would:
+
+- Add complexity that delays the first logged run
+- Produce profiles that don't match real Claude Code behavior
+- Create a gap between what you observe and what you actually use
+
+Using the Anthropic SDK with the same models and tools means the logged profiles reflect Claude Code's actual cost structure.
+
+### First-Target Agent Config (Claude)
+
+Use Claude Haiku for batch logging runs (low cost, high volume):
+
+```yaml
+agent:
+  agent_version: "mvp-0.1"
+  provider: "anthropic"
+  model: "claude-haiku-4-5-20251001"
+  system_prompt: "You are a helpful assistant. Use tools only when necessary."
+  temperature: 0
+  max_tool_calls: 5
+
+tools:
+  - name: "web_search"
+    enabled: true
+    description: "Search the web for current information."
+  - name: "calculator"
+    enabled: true
+    description: "Evaluate arithmetic expressions."
+
+truncation:
+  tool_result_max_chars: 4000
+
+budget:
+  max_task_cost_usd_p90: 0.02
+  max_batch_cost_usd: 2.00
+
+privacy:
+  mode: "synthetic_only"
+```
+
+Switch to `claude-sonnet-4-6` when you want to profile the model you actually use in production.
+
+### Anthropic SDK Specifics
+
+**Creating messages:**
+
+```python
+from anthropic import Anthropic
+client = Anthropic()
+
+response = client.messages.create(
+    model=model,
+    max_tokens=1024,
+    system=system_prompt,
+    tools=tools,       # list of dicts with name, description, input_schema
+    messages=messages,
+)
+```
+
+**Token usage (different from OpenAI):**
+
+```python
+usage = response.usage
+input_tokens  = usage.input_tokens
+output_tokens = usage.output_tokens
+# Prompt cache fields (when prompt caching is active)
+cache_read_input_tokens  = getattr(usage, "cache_read_input_tokens", 0) or 0
+cache_write_input_tokens = getattr(usage, "cache_write_input_tokens", 0) or 0
+```
+
+**Detecting tool use and extracting calls:**
+
+```python
+stop_reason = response.stop_reason  # "end_turn" | "tool_use" | "max_tokens"
+
+for block in response.content:
+    if block.type == "tool_use":
+        tool_name   = block.name
+        arguments   = block.input   # already a dict, not a JSON string
+        tool_use_id = block.id
+```
+
+**Tool result format (sent back to the model):**
+
+```python
+messages.append({"role": "assistant", "content": response.content})
+messages.append({
+    "role": "user",
+    "content": [
+        {
+            "type": "tool_result",
+            "tool_use_id": tool_use_id,
+            "content": json.dumps(inserted_result),
+        }
+    ],
+})
+```
+
+### Claude Tool Schema Format
+
+Anthropic uses `input_schema` instead of OpenAI's `parameters`:
+
+```python
+WEB_SEARCH_SCHEMA = {
+    "name": "web_search",
+    "description": "Search the web for current or external information.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string"},
+        },
+        "required": ["query"],
+    },
+}
+```
+
+### Static Pricing (Claude Models)
+
+| Model | Input (per 1M) | Output (per 1M) | Cache read (per 1M) | Cache write (per 1M) |
+|-------|---------------|----------------|---------------------|----------------------|
+| `claude-haiku-4-5-20251001` | $0.80 | $4.00 | $0.08 | $1.00 |
+| `claude-sonnet-4-6` | $3.00 | $15.00 | $0.30 | $3.75 |
+
+Log runs at Haiku scale (cheap, many runs). Verify the profile holds when switched to Sonnet.
+
+### MCP Tools — Deferred to Milestone 2+
+
+Claude Code uses MCP (Model Context Protocol) servers for tools like Brave Search, file access, and custom integrations. MCP tool wrapping requires intercepting at the MCP client level, which is more complex than plain function tools.
+
+In Milestone 1, approximate Claude Code's tool behavior using Anthropic function tools (`web_search` via DuckDuckGo, `calculator`). Add real MCP tool interception in Milestone 2 once the logging loop is proven with function tools.
 
 ---
 
@@ -1799,11 +1964,11 @@ Six weeks, nights and weekends. One working loop per week. Logging comes before 
 ### Week 1 — Logging Infrastructure *(Milestone 1, part 1)*
 
 - `db.py`: SQLite schema for `model_pricing`, `agent_configs`, `agent_runs`, `model_calls`, `tool_calls`
-- `pricing.py`: static pricing table for `gpt-4o-mini` and `gpt-4o`
-- `tool_registry.py`: load `web_search` and `calculator` from `agent_config.yaml`; count schema tokens; compute `tool_registry_hash`
-- `executor.py`: run target agent through real model API; route all tool calls through `observed_tool_call` wrapper
+- `pricing.py`: static pricing for Claude models (`claude-haiku-4-5-20251001`, `claude-sonnet-4-6`); include OpenAI rows for future comparison
+- `tool_registry.py`: load `web_search` and `calculator` from `agent_config.yaml`; define schemas in Anthropic `input_schema` format; count schema tokens; compute `tool_registry_hash`
+- `executor.py`: call Claude via Anthropic SDK (`client.messages.create()`); handle `tool_use` blocks; route all tool calls through `observed_tool_call` wrapper; capture `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_write_input_tokens`
 - `logger.py`: write `agent_runs`, `model_calls`, `tool_calls` (with source URLs); apply sample quality score
-- `acf run "..."` CLI command: run a single prompt and log the full trace
+- `acf run "..."` CLI command: run a single prompt through Claude and log the full trace
 - Verify: `Σ model_calls.input_tokens == agent_runs.actual_input_tokens`
 
 ### Week 2 — Batch Logging and Validation *(Milestone 1, part 2)*

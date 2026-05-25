@@ -1,12 +1,15 @@
 agent:
   agent_version: "mvp-0.1"
-  model: "gpt-4o-mini"
+  provider: "anthropic"
+  # Use Haiku for batch logging (cheap). Switch to claude-sonnet-4-6 to profile your real workload.
+  model: "claude-haiku-4-5-20251001"
   system_prompt: >
     You are a helpful assistant. Use tools only when necessary.
-    For questions requiring current data or external information, use web_search.
-    For arithmetic, use calculator. Do not guess numbers — look them up or calculate them.
+    For questions requiring current data or external facts, use web_search.
+    For arithmetic, use calculator. Do not estimate numbers — look them up or calculate them.
   temperature: 0
-  max_tool_calls: 3
+  max_tool_calls: 5
+  max_tokens: 4096
 
 tools:
   - name: "web_search"
@@ -14,18 +17,15 @@ tools:
     description: "Search the web for current or external information."
   - name: "calculator"
     enabled: true
-    description: "Perform arithmetic calculations on a mathematical expression."
+    description: "Evaluate arithmetic expressions."
 
 truncation:
   # Maximum characters to insert from a single tool result into the context window.
-  # Larger values improve answer quality but increase token cost.
   tool_result_max_chars: 4000
 
 budget:
-  max_task_cost_usd_p90: 0.05    # warn if estimated p90 cost exceeds this
-  max_batch_cost_usd: 5.00       # hard stop for a full batch run
+  max_task_cost_usd_p90: 0.02
+  max_batch_cost_usd: 2.00
 
 privacy:
-  # "synthetic_only" — store prompt hashes, not raw prompts, for production runs
-  # "off"            — store nothing beyond IDs
   mode: "synthetic_only"

@@ -1,0 +1,2 @@
+[console_scripts]
+acf = app.cli:main
