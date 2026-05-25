@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=65"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-cost-forecaster"
+version = "0.1.0"
+description = "Logging-first cost profiler and budget guard for tool-using AI agents"
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=1.30.0",
+    "tiktoken>=0.7.0",
+    "pyyaml>=6.0",
+    "duckduckgo-search>=6.0.0",
+    "rich>=13.0.0",
+]
+
+[project.scripts]
+acf = "app.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
