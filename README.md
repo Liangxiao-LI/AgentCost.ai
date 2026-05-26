@@ -58,28 +58,89 @@ flowchart TD
 
     subgraph L4["LAYER 4 · Local Storage"]
         direction LR
-        SQ[("SQLite ~/.acf/acf.db\nRecommended: local dev / OSS\nExample table: agent_runs")]
-        PG[("PostgreSQL agentcost_engine_db\nRecommended: hosted / production\nMigrate when: team or >100k runs")]
+        subgraph L4A[" "]
+            direction TB
+            SQ[("SQLite ~/.acf/acf.db")]
+            SQ_N["File goal: local cost-data store\nRecommended: local dev / OSS\nExample table: agent_runs"]
+        end
+        subgraph L4B[" "]
+            direction TB
+            PG[("PostgreSQL agentcost_engine_db")]
+            PG_N["File goal: hosted DB for engine\nRecommended: production\nMigrate when: team or >100k runs"]
+        end
     end
 
     subgraph L5["LAYER 5 · Analytics, Profiling & Governance"]
         direction LR
-        PRF["profiler.py · Profiler\nBuilds empirical p50/p90 distributions\nExample metric: cost per model × tool"]
-        PRD["predictor.py · Cost Predictor\nPre-run p50/p90 estimate, under 200 ms\nExample output: prediction_id + p90 USD"]
-        BGD["Budget Guard (inside predictor.py)\nGates execution against p90 limit\nExample status: blocked"]
-        CLI["acf CLI\nUser-facing commands\nExample: acf predict"]
-        DSH["Optional Dashboard (future)\nSpend over time + trace viewer\nExample stack: Streamlit MVP"]
+        subgraph L5A[" "]
+            direction TB
+            PRF["profiler.py"]
+            PRF_N["File goal: Profiler\nWhat it does: build p50/p90 distributions\nExample metric: cost per model × tool"]
+        end
+        subgraph L5B[" "]
+            direction TB
+            PRD["predictor.py"]
+            PRD_N["File goal: Cost Predictor\nWhat it does: pre-run p50/p90 estimate\nExample output: prediction_id + p90 USD"]
+        end
+        subgraph L5C[" "]
+            direction TB
+            BGD["Budget Guard"]
+            BGD_N["Lives in: predictor.py\nWhat it does: gate execution by p90\nExample status: blocked"]
+        end
+        subgraph L5D[" "]
+            direction TB
+            CLI["acf CLI"]
+            CLI_N["Component goal: user-facing commands\nWhat it does: run / inspect / predict\nExample command: acf predict"]
+        end
+        subgraph L5E[" "]
+            direction TB
+            DSH["acf dashboard (future)"]
+            DSH_N["Component goal: visualize spend + traces\nWhat it does: charts + budget status\nExample stack: Streamlit MVP"]
+        end
+        subgraph L5G[" "]
+            direction TB
+            GLOSS["Glossary"]
+            GLOSS_N["p50 = median estimate (50th percentile)\np90 = pessimistic estimate (90th percentile)\nhistorical tool_calls = past tool-call rows\nlogged in SQLite — the empirical sample"]
+        end
     end
 
     subgraph L6["LAYER 6 · Community Benchmarking (opt-in, future)"]
         direction LR
-        ANO["acf/sync/ · Anonymized Sync Client\nUploads aggregates only — never raw text\nExample upload: token counts"]
-        ING["Ingestion API (private repo)\nFastAPI receiver, token-auth\nExample: POST /v1/ingest"]
-        QUE["Buffer Queue\nExample: AWS SQS"]
-        ELK[("Raw Event Lake\nAnonymized Parquet, admin-only read\nExample: s3://agentcost-community-logs/")]
-        BLD["Profile Builder (nightly batch)\nAggregates p50/p90 per model × tool\nExample runtime: AWS Lambda"]
-        ART[("Shared Profile Store\nPublic p50/p90 artifacts\nExample: s3://agentcost-profile-artifacts/")]
-        PUB["Community Profiles API\nServes cold-start fallback profiles\nExample: GET /v1/community/profiles"]
+        subgraph L6A[" "]
+            direction TB
+            ANO["acf/sync/"]
+            ANO_N["Component goal: anonymized sync client\nWhat it does: upload aggregates only\nExample upload: token counts"]
+        end
+        subgraph L6B[" "]
+            direction TB
+            ING["Ingestion API"]
+            ING_N["Component goal: receive contributor data\nWhat it does: token-auth FastAPI receiver\nExample route: POST /v1/ingest"]
+        end
+        subgraph L6C[" "]
+            direction TB
+            QUE["Buffer Queue"]
+            QUE_N["Component goal: decouple ingest spikes\nWhat it does: buffers raw events\nExample stack: AWS SQS"]
+        end
+        subgraph L6D[" "]
+            direction TB
+            ELK[("Raw Event Lake")]
+            ELK_N["Storage goal: archive anonymized events\nWhat it stores: Parquet, admin-only read\nExample path: s3://agentcost-community-logs/"]
+        end
+        subgraph L6E[" "]
+            direction TB
+            BLD["Profile Builder"]
+            BLD_N["Component goal: nightly batch aggregator\nWhat it does: p50/p90 per model × tool\nExample runtime: AWS Lambda"]
+        end
+        subgraph L6F[" "]
+            direction TB
+            ART[("Shared Profile Store")]
+            ART_N["Storage goal: publish shared profiles\nWhat it stores: public p50/p90 artifacts\nExample path: s3://agentcost-profile-artifacts/"]
+        end
+        subgraph L6G[" "]
+            direction TB
+            PUB["Community Profiles API"]
+            PUB_N["Component goal: serve cold-start fallback\nWhat it does: returns shared profiles\nExample route: GET /v1/community/profiles"]
+        end
     end
 
     %% ── Flows 1–3: agent runs, calls tools, SDK intercepts ──
@@ -121,8 +182,11 @@ flowchart TD
     class EXE,LOG,PRC sdk
     class EXE_N,LOG_N,PRC_N note
     class SQ,PG sto
-    class PRF,PRD,BGD,CLI,DSH ana
+    class SQ_N,PG_N note
+    class PRF,PRD,BGD,CLI,DSH,GLOSS ana
+    class PRF_N,PRD_N,BGD_N,CLI_N,DSH_N,GLOSS_N note
     class ANO,ING,QUE,ELK,BLD,ART,PUB cld
+    class ANO_N,ING_N,QUE_N,ELK_N,BLD_N,ART_N,PUB_N note
 ```
 
 > _`predictor.py` lives in the public repo during M1–M4 (rule-based, fully local). Extracted to `agentcost-engine` at Phase 5 after M4 user validation. See [docs/05-architecture.md](docs/05-architecture.md) for the extraction plan._
