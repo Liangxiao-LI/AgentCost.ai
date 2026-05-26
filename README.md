@@ -72,6 +72,11 @@ flowchart TD
 
     subgraph L5["LAYER 5 · Analytics, Profiling & Governance"]
         direction LR
+        subgraph L5G[" "]
+            direction TB
+            GLOSS["Glossary (read first)"]
+            GLOSS_N["p50 = median estimate (50th percentile)\np90 = pessimistic estimate (90th percentile)\nhistorical tool_calls = past tool-call rows\nlogged in SQLite — the empirical sample\n─── Worked example ───\n100 logged web_search calls on Haiku →\nsort cost ascending, take the 50th value = p50\ntake the 90th value = p90\np50 = $0.002 · p90 = $0.006\nmeans: 90% of future calls should cost ≤ $0.006"]
+        end
         subgraph L5A[" "]
             direction TB
             PRF["profiler.py"]
@@ -96,11 +101,6 @@ flowchart TD
             direction TB
             DSH["acf dashboard (future)"]
             DSH_N["Component goal: visualize spend + traces\nWhat it does: charts + budget status\nExample stack: Streamlit MVP"]
-        end
-        subgraph L5G[" "]
-            direction TB
-            GLOSS["Glossary"]
-            GLOSS_N["p50 = median estimate (50th percentile)\np90 = pessimistic estimate (90th percentile)\nhistorical tool_calls = past tool-call rows\nlogged in SQLite — the empirical sample"]
         end
     end
 
