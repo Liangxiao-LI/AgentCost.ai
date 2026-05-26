@@ -8,69 +8,119 @@ A logging-first cost profiler and budget guard for tool-using AI agents.
 
 ## Architecture
 
-AgentCost.ai is a **local-first cost observability pipeline** for AI agents. It instruments model and tool calls, logs structured traces, builds empirical cost profiles, predicts p50/p90 run cost before execution, and applies a budget guard. The public repo owns the local SDK and CLI. The private/future engine owns optional hosted aggregation and shared cold-start profiles.
+AgentCost.ai is a **local-first cost observability and governance pipeline** for AI agents. It intercepts LLM and tool calls with a 1-line SDK change, logs structured traces to local SQLite, builds empirical p50/p90 cost profiles, and predicts + guards run cost before execution. An optional future layer enables anonymized community benchmarking. The public repo covers Layers 1–5. Layer 6 is opt-in, future, and private.
+
+> **Color key:** 🔵 Blue = existing agent runtime &nbsp;·&nbsp; 🟢 Green = AgentCost SDK (current OSS) &nbsp;·&nbsp; 🟡 Yellow = local storage &nbsp;·&nbsp; 🟣 Purple = analytics & governance (current OSS) &nbsp;·&nbsp; 🔴 Red = future cloud layer (Phase 5+, opt-in) &nbsp;·&nbsp; `──→` solid = current data flow (numbered) &nbsp;·&nbsp; `- -→` dashed = optional / future sync
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#f0f9ff', 'primaryTextColor': '#1e3a5f', 'primaryBorderColor': '#93c5fd', 'lineColor': '#64748b'}}}%%
 flowchart TD
-    DEV(["Developer / Agent Builder"])
 
-    subgraph RUNTIME["A — Agent Runtime"]
+    classDef rt   fill:#dbeafe,stroke:#3b82f6,color:#1e3a5f
+    classDef sdk  fill:#dcfce7,stroke:#16a34a,color:#14532d
+    classDef sto  fill:#fef3c7,stroke:#d97706,color:#78350f
+    classDef ana  fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
+    classDef cld  fill:#fee2e2,stroke:#dc2626,color:#7f1d1d
+
+    subgraph L1["LAYER 1  ·  Developer & Agent Runtime  ·  your existing environment"]
+        DEV(["👤 Developer / Agent Builder"])
+        AGENT["Existing AI Agent\nClaude Code · OpenAI Agents SDK\nCustom Python · LangChain / LlamaIndex"]
+        TOOLS["Agent Tool Calls\nweb_search · calculator\nMCP tools (Milestone 2+) · file_search (deferred)"]
+    end
+
+    subgraph L2["LAYER 2  ·  SDK Instrumentation  ·  current OSS SDK  ·  1-line code change"]
         direction LR
-        AG["Claude Code · OpenAI Agent\nclaude-haiku · claude-sonnet · gpt-4o"]
-        TL["Tools: web_search · calculator\nMCP — Milestone 2+  ·  file_search — deferred"]
+        A1["acf/integrations/anthropic.py\nDrop-in Anthropic SDK wrapper"]
+        A2["acf/integrations/openai.py\nDrop-in OpenAI SDK wrapper"]
+        A3["acf.patch()\nGlobal monkey-patch, zero code change"]
+        A4["acf.track()\nPer-session context manager"]
     end
 
-    subgraph SDK["B — AgentCost.ai Public SDK  (open source · this repo)"]
-        direction TB
-        INSTR["Instrumentation\nacf/integrations/anthropic.py  openai.py\nacf.patch()  ·  acf.track()"]
-        EXE["executor.py\nobserved_tool_call wrapper\ntokens · source URLs · latency"]
-        LOG["logger.py\ntoken counts · tool calls\nAPI-equivalent cost · source URLs"]
-        DB[("SQLite  ~/.acf/acf.db\npredictions  agent_runs  model_calls\ntool_calls  tool_profiles\nmodel_pricing  agent_configs")]
-        PROF["profiler.py\np50/p90 per tool × model\np90_coverage · underestimation_rate"]
-        PRED["predictor.py *\nrule-based router\ntoken + price estimator\nbudget guard: safe / warning / blocked / unknown"]
-        SYNC["acf/sync/\nanonymizer.py · syncer.py\ndry-run during MVP Weeks 1–5"]
-
-        INSTR --> EXE --> LOG --> DB
-        DB --> PROF -->|"updated p50/p90"| PRED
-        DB --> SYNC
-    end
-
-    CLI["acf CLI\nrun · run-batch · predict · profiles\ncalibration · trace · sources · suggest-tools"]
-
-    subgraph ENGINE["C — Phase 5+  (agentcost-engine · private repo · not yet built)"]
+    subgraph L3["LAYER 3  ·  Local Observability Core  ·  current OSS SDK"]
         direction LR
-        APIE["agentcost-engine-api  FastAPI\nPOST /v1/predict\nGET /v1/community/profiles"]
-        S3L[("s3://agentcost-community-logs/\nanonymized JSONL  no raw text")]
-        WORKER["profile-builder\nnightly batch worker"]
-        S3P[("s3://agentcost-profile-artifacts/\nshared p50/p90 aggregates")]
+        EXE["executor.py  ·  Executor Wrapper\nCaptures per call: model · input/output/cache tokens\nlatency · finish_reason · source URLs · tool arguments"]
+        LOG["logger.py  ·  Event Logger\nNormalizes events into structured trace records\nComputes api_equivalent_cost_usd  (tokens × rate)\nAssigns trace_id · run_id · model_call_id · tool_call_id\nPrivacy: off · hash_only · redact_pii · synthetic_only"]
+        PRC["pricing.py  ·  Pricing Resolver\nPer-model token rates (per 1M tokens)\nSnapshots rate at log time — price-change safe\nbilling_mode: subscription vs API  ·  cost_basis labels"]
     end
 
-    DEV -->|"agent runs"| RUNTIME
-    DEV <-->|"acf CLI commands"| CLI
-    RUNTIME -->|"1-line: import swap or acf.patch()"| INSTR
-    CLI -->|"triggers run"| EXE
-    CLI -->|"requests prediction"| PRED
-    PRED -->|"p50/p90 + budget decision"| CLI
-    DB -->|"query results"| CLI
-    SYNC -.->|"opt-in anonymized sync\ntoken counts · model · tool names\nsource domains · prompt hash\nno raw text · no full URLs"| S3L
-    S3L -.-> WORKER -.-> S3P
-    S3P -.->|"cold-start profiles on startup"| DB
-    APIE -.->|"hosted prediction  Phase 5+"| CLI
+    subgraph L4["LAYER 4  ·  Local Storage"]
+        direction LR
+        SQ[("SQLite  ~/.acf/acf.db\n✅ Recommended: local dev / OSS / zero infra\nagent_runs · model_calls · tool_calls\ntool_profiles · predictions · model_pricing · agent_configs")]
+        PG[("PostgreSQL  agentcost_engine_db\n⬜ Recommended: hosted / team / production\nIdentical schema · Postgres-compatible\nMigrate when: team use or more than 100k runs")]
+    end
+
+    subgraph L5["LAYER 5  ·  Analytics, Profiling & Governance  ·  current OSS SDK"]
+        PRF["profiler.py  ·  Profiler\nBuilds empirical distributions from logged tool_calls\np50/p90: cost · latency · tokens  per model × tool × category\nCalibration: p90_coverage target ≥ 0.90  ·  underestimation_rate target ≤ 0.10"]
+        PRD["predictor.py  ·  Cost Predictor\nPre-run p50/p90 estimate · under 200 ms · no model call made\nToken est: fixed (tool schemas) + variable (P × E × result tokens)\nRule-based router now → embedding + ML router at Phase 5\nOutputs: prediction_id · p50/p90 USD · cost drivers · optimization hints"]
+        BGD["Budget Guard  [inside predictor.py]\nsafe: p90 below budget  ·  warning: p50 ok but p90 near limit\nblocked: p90 exceeds limit  ·  unknown: no profile data yet\nshould_execute boolean  ·  project / run / per-tool constraints"]
+        CLI["acf CLI\nrun · run-batch · predict · profiles · trace\ncalibration · suggest-tools · compare · sources · export"]
+        DSH["Optional Dashboard  [future]\nSpend over time · trace viewer · budget status\nModel / tool cost comparison\nStreamlit MVP  →  Next.js production"]
+    end
+
+    subgraph L6["LAYER 6  ·  Community Benchmarking  ·  optional · future Phase 5+ · opt-in only"]
+        ANO["acf/sync/  ·  Anonymized Sync Client\nUPLOADS ONLY: token counts · model · tool names · domains · cost · prompt hash\nNEVER UPLOADS: raw prompts · raw outputs · full source URLs · secrets\nDry-run during MVP Weeks 1–5"]
+        ING["Ingestion API  [agentcost-engine · private repo]\nFastAPI + API Gateway / Lambda\nPOST /v1/ingest  (contributor token auth)"]
+        QUE["Buffer Queue\nAWS SQS / Kinesis Firehose"]
+        ELK[("Raw Event Lake\ns3://agentcost-community-logs/\nAnonymized JSONL / Parquet  ·  admin-only read\nAWS Glue Data Catalog + Athena for SQL queries")]
+        BLD["Profile Builder  [nightly batch]\nAWS Lambda / ECS Fargate / Step Functions\nAggregates p50/p90 per model × tool × category"]
+        ART[("Shared Profile Store\ns3://agentcost-profile-artifacts/\np50/p90 aggregates per model × tool  ·  public read")]
+        PUB["Community Profiles API\nGET /v1/community/profiles\nPublic p50/p90 aggregates\nCold-start fallback for new SDK installs"]
+    end
+
+    %% ── Flows 1–3: agent runs, calls tools, SDK intercepts ──
+    DEV -->|"① run agent"| AGENT
+    AGENT -->|"② call LLMs + tools"| TOOLS
+    AGENT -->|"③ SDK intercepts LLM calls"| A1
+    AGENT -->|"③ or via global patch"| A3
+    TOOLS -->|"③ SDK intercepts tool calls"| A1
+
+    %% ── Flows 4–6: capture → normalize → store ──
+    A1 -->|"④ observe each call"| EXE
+    A2 -->|"④"| EXE
+    A3 -->|"④"| EXE
+    A4 -->|"④"| EXE
+    EXE -->|"⑤ normalize + compute cost"| LOG
+    PRC -.->|"token rates"| LOG
+    LOG -->|"⑥ write structured trace"| SQ
+
+    %% ── Flows 7–9: profile → predict → govern ──
+    SQ -->|"⑦ read historical tool_calls"| PRF
+    PRF -->|"updated p50/p90 profiles"| PRD
+    SQ -->|"load profiles + pricing"| PRD
+    PRD -->|"⑧ p50/p90 estimate + cost drivers"| BGD
+    BGD -->|"should_execute + budget status"| CLI
+    SQ -->|"⑨ query traces, costs, profiles"| CLI
+    CLI --> DSH
+
+    %% ── Flows 10–12: optional anonymized community sync ──
+    SQ -->|"⑩ opt-in: read pending sync rows"| ANO
+    ANO -.->|"⑩ anonymized aggregates only"| ING
+    ING -.-> QUE -.-> ELK
+    ELK -.->|"⑪ nightly aggregate build"| BLD
+    BLD -.-> ART -.-> PUB
+    PUB -.->|"⑫ download cold-start profiles on startup"| SQ
+
+    %% ── Color assignments ──
+    class DEV,AGENT,TOOLS rt
+    class A1,A2,A3,A4,EXE,LOG,PRC sdk
+    class SQ,PG sto
+    class PRF,PRD,BGD,CLI,DSH ana
+    class ANO,ING,QUE,ELK,BLD,ART,PUB cld
 ```
 
-> _\* `predictor.py` lives in the public repo during M1–M4 (rule-based, fully local). Extracted to `agentcost-engine` at Phase 5 after M4 user validation._
+> _`predictor.py` lives in the public repo during M1–M4 (rule-based, fully local). Extracted to `agentcost-engine` at Phase 5 after M4 user validation. See [docs/05-architecture.md](docs/05-architecture.md) for the extraction plan._
 
 **Public vs Private Boundary**
 
 | Layer | Location | Status | Contains | Must NOT contain |
 |---|---|---|---|---|
-| Public SDK + CLI | `AgentCost.ai` (this repo) | MVP — active | Instrumentation wrappers, executor, logger, profiler, local predictor, budget guard, all CLI commands | Cloud infra, ML router, paid API keys |
-| Local SQLite | `~/.acf/acf.db` (user machine) | MVP — active | Token counts, tool calls, source URLs, API-equivalent cost, tool profiles, agent configs | Raw prompt text (salted-hashed before write), raw tool outputs |
+| SDK + CLI (Layers 2–5) | `AgentCost.ai` (this repo) | MVP — active | Instrumentation wrappers, executor, logger, profiler, local predictor, budget guard, all CLI commands | Cloud infra, ML router, paid API keys |
+| Local SQLite | `~/.acf/acf.db` (user machine) | MVP — active | Token counts, tool calls, source URLs, API-equivalent cost, tool profiles, agent configs | Raw prompt text (salted-hashed before write), raw tool output text |
 | Local config | `config/agent_config.yaml` | MVP — active | Model name, tools list, temperature, budget limits, privacy mode | API keys — use `ANTHROPIC_API_KEY` env var |
-| Optional sync | `acf/sync/` (this repo) | Dry-run MVP → live Phase 5+ | Anonymized: token counts, model, tool names, source domains, salted prompt hash | Raw prompts, tool arguments, result content, full source URLs |
-| Private engine | `agentcost-engine` (separate repo) | Phase 5+ — not yet built | Hosted prediction API, ML router, community profile aggregation | All raw user data — stays local |
-| Community data lake | `s3://agentcost-community-logs/` | Phase 5+ — planned | Anonymized JSONL/Parquet run records | Raw prompts, tool outputs, full URLs |
-| Shared profile artifacts | `s3://agentcost-profile-artifacts/` | Phase 5+ — planned | Published p50/p90 per (tool × model), downloaded on startup | Individual run records, contributor identifiers |
+| Optional sync client | `acf/sync/` (this repo) | Dry-run MVP → live Phase 5+ | Anonymized: token counts, model, tool names, source domains, salted prompt hash | Raw prompts, tool arguments, result content, full source URLs |
+| Private engine | `agentcost-engine` (separate repo) | Phase 5+ — not yet built | Hosted prediction API, ML router, community profile aggregation, PostgreSQL metadata DB | All raw user data — always stays local |
+| Community data lake | `s3://agentcost-community-logs/` | Phase 5+ — planned | Anonymized JSONL/Parquet, admin-only read, queried via AWS Glue + Athena | Raw prompts, tool outputs, full URLs, contributor identifiers |
+| Shared profile artifacts | `s3://agentcost-profile-artifacts/` | Phase 5+ — planned | Published p50/p90 per (tool × model), downloaded by SDK on startup as cold-start fallback | Individual run records, raw contributor data |
 
 ---
 
