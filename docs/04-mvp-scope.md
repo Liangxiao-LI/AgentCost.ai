@@ -20,41 +20,6 @@ Everything else — embedding routers, supervised classifiers, training datasets
 - *See exactly what your agent costs while it runs.*
 - *A logging-first cost profiler and budget guard for tool-using AI agents.*
 
-### The Four-Stage MVP Loop
-
-**Stage 1 — Log**
-```
-acf run
-→ observe model calls and tool calls
-→ log token usage, source URLs, api_equivalent_cost_usd
-```
-
-**Stage 2 — Profile**
-```
-acf profiles --update
-→ compute p50/p90 per tool
-→ compute p50/p90 per prompt category
-→ compute average calls per tool
-```
-
-**Stage 3 — Predict** *(requires Stage 2 data)*
-```
-acf predict
-→ estimate API-equivalent cost from empirical profiles
-→ return p50/p90
-→ apply budget guard
-→ explain cost drivers
-```
-
-**Stage 4 — Validate**
-```
-acf run-batch --heldout
-→ compare predicted vs actual API-equivalent cost
-→ calculate p90 coverage and underestimation rate
-```
-
-A solo founder working nights and weekends can complete all four stages in six weeks.
-
 ### Goals and Non-Goals
 
 **Goals**

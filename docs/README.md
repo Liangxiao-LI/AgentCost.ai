@@ -46,6 +46,3 @@ This folder contains the full architecture split into focused documents. Read th
 
 **I'm planning the six-week build** → [14-roadmap.md](14-roadmap.md)
 
----
-
-The canonical single-file version is [../architecture.md](../architecture.md).

@@ -1,5 +1,7 @@
 # SDK Integration Layer
 
+> **Status: Planned — MVP. The integration modes and CLI commands described here are the target design. `acf/integrations/` and zero-config storage are built in Week 1; `acf summary`, `acf log`, `acf predict` follow in Weeks 2–4.**
+
 ## Get Started in 3 Steps
 
 For existing Claude Code / Anthropic API users, integration takes under two minutes.

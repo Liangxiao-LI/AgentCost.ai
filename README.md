@@ -8,45 +8,131 @@ A logging-first cost profiler and budget guard for tool-using AI agents.
 
 ## Architecture
 
+AgentCost.ai is a **local-first cost observability pipeline** for AI agents. It instruments model and tool calls, logs structured traces, builds empirical cost profiles, predicts p50/p90 run cost before execution, and applies a budget guard. The public repo owns the local SDK and CLI. The private/future engine owns optional hosted aggregation and shared cold-start profiles.
+
 ```mermaid
 flowchart TD
-    AGENT(["🤖  Your Agent\nClaude · GPT-4 · Gemini  +  tools"])
+    DEV(["Developer / Agent Builder"])
 
-    subgraph SDK["🟢  Public SDK — this repo  (open source)"]
+    subgraph RUNTIME["A — Agent Runtime"]
         direction LR
-        S1["**① Log**\n`acf run`\ncaptures every token,\ntool call & source URL"]
-        S2["**② Profile**\n`acf profiles --update`\nbuilds p50 / p90 per\ntool & prompt category"]
-        S3["**③ Predict**\n`acf predict`\ncost estimate + budget guard\nbefore the agent runs"]
-        S4["**④ Validate**\n`acf calibration`\np90_coverage ≥ 0.90\nunderestimation_rate ≤ 0.10"]
-        S1 --> S2 --> S3 --> S4
-        S4 -->|"more data → better profiles"| S1
+        AG["Claude Code · OpenAI Agent\nclaude-haiku · claude-sonnet · gpt-4o"]
+        TL["Tools: web_search · calculator\nMCP — Milestone 2+  ·  file_search — deferred"]
     end
 
-    subgraph NET["🟣  Community Network — private engine  (Phase 5+)"]
-        direction LR
-        SYNC["anonymize + upload\ntoken counts · model · tool names\nno raw text, ever"]
-        LAKE[("community\ndata lake")]
-        COLD["community profiles\nbetter cold-start predictions\nfor every contributor"]
+    subgraph SDK["B — AgentCost.ai Public SDK  (open source · this repo)"]
+        direction TB
+        INSTR["Instrumentation\nacf/integrations/anthropic.py  openai.py\nacf.patch()  ·  acf.track()"]
+        EXE["executor.py\nobserved_tool_call wrapper\ntokens · source URLs · latency"]
+        LOG["logger.py\ntoken counts · tool calls\nAPI-equivalent cost · source URLs"]
+        DB[("SQLite  ~/.acf/acf.db\npredictions  agent_runs  model_calls\ntool_calls  tool_profiles\nmodel_pricing  agent_configs")]
+        PROF["profiler.py\np50/p90 per tool × model\np90_coverage · underestimation_rate"]
+        PRED["predictor.py *\nrule-based router\ntoken + price estimator\nbudget guard: safe / warning / blocked / unknown"]
+        SYNC["acf/sync/\nanonymizer.py · syncer.py\ndry-run during MVP Weeks 1–5"]
+
+        INSTR --> EXE --> LOG --> DB
+        DB --> PROF -->|"updated p50/p90"| PRED
+        DB --> SYNC
     end
 
-    AGENT -->|"instrument — 1 line"| SDK
-    SDK  -->|"opt-in sync  ·  dry-run during MVP"| SYNC
-    SYNC --> LAKE --> COLD -->|"shared p50/p90\ndownloaded on startup"| SDK
+    CLI["acf CLI\nrun · run-batch · predict · profiles\ncalibration · trace · sources · suggest-tools"]
+
+    subgraph ENGINE["C — Phase 5+  (agentcost-engine · private repo · not yet built)"]
+        direction LR
+        APIE["agentcost-engine-api  FastAPI\nPOST /v1/predict\nGET /v1/community/profiles"]
+        S3L[("s3://agentcost-community-logs/\nanonymized JSONL  no raw text")]
+        WORKER["profile-builder\nnightly batch worker"]
+        S3P[("s3://agentcost-profile-artifacts/\nshared p50/p90 aggregates")]
+    end
+
+    DEV -->|"agent runs"| RUNTIME
+    DEV <-->|"acf CLI commands"| CLI
+    RUNTIME -->|"1-line: import swap or acf.patch()"| INSTR
+    CLI -->|"triggers run"| EXE
+    CLI -->|"requests prediction"| PRED
+    PRED -->|"p50/p90 + budget decision"| CLI
+    DB -->|"query results"| CLI
+    SYNC -.->|"opt-in anonymized sync\ntoken counts · model · tool names\nsource domains · prompt hash\nno raw text · no full URLs"| S3L
+    S3L -.-> WORKER -.-> S3P
+    S3P -.->|"cold-start profiles on startup"| DB
+    APIE -.->|"hosted prediction  Phase 5+"| CLI
 ```
 
-**How it works in 30 seconds:**
-1. Wrap your agent with one line — `acf.patch()` or import `acf/integrations/anthropic.py`
-2. Run `acf run` to log a prompt; it captures every token count, tool call, and source URL
-3. Run `acf profiles --update` to build empirical p50/p90 cost distributions from your logs
-4. Run `acf predict` to get a cost estimate and budget decision *before* your agent executes
-5. Every run feeds back into the loop — predictions get more accurate over time
-6. Opt-in sync shares your anonymized token stats with the community, improving cold-start predictions for everyone
+> _\* `predictor.py` lives in the public repo during M1–M4 (rule-based, fully local). Extracted to `agentcost-engine` at Phase 5 after M4 user validation._
+
+**Public vs Private Boundary**
+
+| Layer | Location | Status | Contains | Must NOT contain |
+|---|---|---|---|---|
+| Public SDK + CLI | `AgentCost.ai` (this repo) | MVP — active | Instrumentation wrappers, executor, logger, profiler, local predictor, budget guard, all CLI commands | Cloud infra, ML router, paid API keys |
+| Local SQLite | `~/.acf/acf.db` (user machine) | MVP — active | Token counts, tool calls, source URLs, API-equivalent cost, tool profiles, agent configs | Raw prompt text (salted-hashed before write), raw tool outputs |
+| Local config | `config/agent_config.yaml` | MVP — active | Model name, tools list, temperature, budget limits, privacy mode | API keys — use `ANTHROPIC_API_KEY` env var |
+| Optional sync | `acf/sync/` (this repo) | Dry-run MVP → live Phase 5+ | Anonymized: token counts, model, tool names, source domains, salted prompt hash | Raw prompts, tool arguments, result content, full source URLs |
+| Private engine | `agentcost-engine` (separate repo) | Phase 5+ — not yet built | Hosted prediction API, ML router, community profile aggregation | All raw user data — stays local |
+| Community data lake | `s3://agentcost-community-logs/` | Phase 5+ — planned | Anonymized JSONL/Parquet run records | Raw prompts, tool outputs, full URLs |
+| Shared profile artifacts | `s3://agentcost-profile-artifacts/` | Phase 5+ — planned | Published p50/p90 per (tool × model), downloaded on startup | Individual run records, contributor identifiers |
+
+---
+
+## Execution Lifecycle
+
+```mermaid
+sequenceDiagram
+    actor Dev as Developer
+    participant CLI as acf CLI
+    participant PRED as predictor.py
+    participant DB as SQLite
+    participant EXE as executor.py
+    participant TOOL as Tool
+    participant LOG as logger.py
+    participant PROF as profiler.py
+
+    Dev->>CLI: acf predict "Find Nvidia revenue"
+    CLI->>DB: load tool_profiles + model_pricing
+    DB-->>PRED: p50/p90 profiles
+    CLI->>PRED: predict(prompt, tools_exposed, budget)
+    PRED->>PRED: token estimator → price estimator
+    PRED-->>CLI: p50=$0.003  p90=$0.006  budget=warning
+    CLI-->>Dev: prediction_id · cost estimate · budget status
+
+    alt should_execute = true (safe or warning)
+        Dev->>CLI: acf run "..." --prediction-id pred_001
+        CLI->>EXE: execute(prompt, agent_config)
+        EXE->>TOOL: observed_tool_call(web_search, query)
+        TOOL-->>EXE: result + source_urls + result_tokens_raw=2200
+        EXE->>LOG: record model_calls + tool_calls (result_tokens_inserted=900)
+        LOG->>DB: write agent_runs · model_calls · tool_calls
+        EXE-->>CLI: actual_api_equivalent_cost=$0.0043
+        CLI->>PROF: acf profiles --update
+        PROF->>DB: recompute p50/p90 from tool_calls
+        Dev->>CLI: acf calibration
+        CLI->>DB: compare predicted vs actual across runs
+        CLI-->>Dev: p90_coverage=0.93 ✓  underestimation_rate=0.07 ✓
+    else should_execute = false (blocked)
+        CLI-->>Dev: BLOCKED — p90 exceeds budget limit
+        Note over Dev,CLI: Run acf suggest-tools to reduce cost
+    end
+```
+
+---
+
+## How it works
+
+1. **Instrument** — wrap your agent runtime with one line: import `acf/integrations/anthropic.py` (Mode A), call `acf.patch()` globally (Mode B), or use `acf.track()` context manager (Mode C)
+2. **Log** — run `acf run`; `executor.py` captures every token count, tool call, and source URL via the `observed_tool_call` wrapper
+3. **Store** — all structured traces are written locally to SQLite at `~/.acf/acf.db`; zero infrastructure required
+4. **Profile** — run `acf profiles --update`; `profiler.py` computes empirical p50/p90 distributions per tool × model from logged `tool_calls`
+5. **Predict** — run `acf predict` before execution; returns a p50/p90 cost estimate and `prediction_id` in under 200ms — no model call made
+6. **Budget guard** — `predictor.py` returns `should_execute` (boolean), `status` (`safe / warning / blocked`), and the top cost drivers; your agent uses this to gate execution
+7. **Calibrate** — run `acf calibration`; compares predicted vs actual across all held-out runs, targeting `p90_coverage ≥ 0.90` and `underestimation_rate ≤ 0.10`
+8. **Sync (optional, Phase 5+)** — opt-in anonymized sync sends only token counts, model name, tool names, and source domains — never raw prompts or outputs — to the community data lake; shared p50/p90 profiles are downloaded on startup to improve cold-start predictions
 
 **Two-repo structure:**
-| Repo | What | Who can contribute |
+
+| Repo | What | Status |
 |---|---|---|
-| `AgentCost.ai` (this repo) | Open-source SDK: logging, profiling, sync, CLI | Anyone |
-| `agentcost-engine` (private, Phase 5+) | Prediction engine, ML router, community server | Core team |
+| `AgentCost.ai` (this repo) | Open-source SDK: instrumentation, logging, profiling, local prediction, CLI | Active — contribute here |
+| `agentcost-engine` (separate private repo) | Hosted prediction engine, ML router, community server, data lake | Phase 5+ — not yet built |
 
 ---
 
@@ -94,8 +180,8 @@ Stage 4 — Validate: acf run-batch --heldout → compare predicted vs actual �
 ## Quick Start
 
 ```bash
-git clone https://github.com/your-org/agent-cost-forecaster
-cd agent-cost-forecaster
+git clone https://github.com/Liangxiao-LI/AgentCost.ai.git
+cd AgentCost.ai
 pip install -r requirements.txt
 
 # Set your Anthropic API key and prompt hash salt
@@ -293,6 +379,6 @@ Everything else — FastAPI, Postgres, embedding router, ML classifier, dashboar
 
 ---
 
-## Architecture
+## Technical Docs
 
-See [architecture.md](architecture.md) for the full technical design: data model, module reference, API design, calibration pipeline, and design principles.
+Full technical design is in the [`docs/`](docs/) folder: data model, module reference, API design, calibration pipeline, and design principles.

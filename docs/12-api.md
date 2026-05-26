@@ -1,5 +1,7 @@
 # API Design
 
+> **Status: Planned — Phase 4+. The local executor and CLI (`acf run`, `acf predict`) are the MVP interface. The REST API described here is the target design, not yet implemented.**
+
 ## `POST /predict`
 
 ```json
