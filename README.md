@@ -22,6 +22,7 @@ flowchart TD
     classDef ana  fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
     classDef cld  fill:#fee2e2,stroke:#dc2626,color:#7f1d1d
     classDef note fill:#f8fafc,stroke:#94a3b8,color:#334155,stroke-dasharray: 3 3
+    classDef gloss fill:#faf5ff,stroke:#a78bfa,color:#4c1d95,stroke-dasharray: 4 4
 
     subgraph L1["LAYER 1 · Developer & Agent Runtime"]
         DEV(["👤 Developer / Agent Builder"])
@@ -72,15 +73,12 @@ flowchart TD
 
     subgraph L5["LAYER 5 · Analytics, Profiling & Governance"]
         direction LR
-        subgraph L5G[" "]
-            direction TB
-            GLOSS["Glossary (read first)"]
-            GLOSS_N["p50 = median estimate (50th percentile)\np90 = pessimistic estimate (90th percentile)\nhistorical tool_calls = past tool-call rows\nlogged in SQLite — the empirical sample\n─── Worked example ───\n100 logged web_search calls on Haiku →\nsort cost ascending, take the 50th value = p50\ntake the 90th value = p90\np50 = $0.002 · p90 = $0.006\nmeans: 90% of future calls should cost ≤ $0.006"]
-        end
         subgraph L5A[" "]
             direction TB
             PRF["profiler.py"]
             PRF_N["File goal: Profiler\nWhat it does: build p50/p90 distributions\nExample metric: cost per model × tool"]
+            GLOSS["<b>Cost Profile Glossary</b>\n• p50 — median estimate (50th percentile)\n• p90 — pessimistic estimate (90th percentile)\n• historical tool_calls — past logged tool-call\n  rows in SQLite (the empirical sample)\n• Example — sort 100 web_search calls by cost\n  → p50 = $0.002 · p90 = $0.006\n• Reading — p90 = $0.006 means 90% of future\n  calls are expected to cost ≤ $0.006"]
+            PRF -.->|"explains its outputs"| GLOSS
         end
         subgraph L5B[" "]
             direction TB
@@ -104,42 +102,42 @@ flowchart TD
         end
     end
 
-    subgraph L6["LAYER 6 · Community Benchmarking (opt-in, future)"]
-        direction LR
+    subgraph L6["LAYER 6 — Community Benchmarking Data Lake (opt-in, future)"]
+        direction TB
         subgraph L6A[" "]
-            direction TB
-            ANO["acf/sync/"]
-            ANO_N["Component goal: anonymized sync client\nWhat it does: upload aggregates only\nExample upload: token counts"]
+            direction LR
+            ANO["acf/sync/\nExample upload: token counts"]
+            ANO_N["<b>Component goal:</b> anonymized sync client\n<b>What it does:</b> upload aggregates only — never raw text"]
         end
         subgraph L6B[" "]
-            direction TB
-            ING["Ingestion API"]
-            ING_N["Component goal: receive contributor data\nWhat it does: token-auth FastAPI receiver\nExample route: POST /v1/ingest"]
+            direction LR
+            ING["Ingestion API\nExample route: POST /v1/ingest"]
+            ING_N["<b>Component goal:</b> receive contributor data\n<b>What it does:</b> token-auth FastAPI receiver"]
         end
         subgraph L6C[" "]
-            direction TB
-            QUE["Buffer Queue"]
-            QUE_N["Component goal: decouple ingest spikes\nWhat it does: buffers raw events\nExample stack: AWS SQS"]
+            direction LR
+            QUE["Buffer Queue\nExample stack: AWS SQS"]
+            QUE_N["<b>Component goal:</b> decouple ingest spikes\n<b>What it does:</b> buffer raw events between ingest and lake"]
         end
         subgraph L6D[" "]
-            direction TB
-            ELK[("Raw Event Lake")]
-            ELK_N["Storage goal: archive anonymized events\nWhat it stores: Parquet, admin-only read\nExample path: s3://agentcost-community-logs/"]
+            direction LR
+            ELK[("Raw Event Lake\nExample path:\ns3://agentcost-community-logs/")]
+            ELK_N["<b>Storage goal:</b> archive anonymized events\n<b>What it stores:</b> Parquet, admin-only read"]
         end
         subgraph L6E[" "]
-            direction TB
-            BLD["Profile Builder"]
-            BLD_N["Component goal: nightly batch aggregator\nWhat it does: p50/p90 per model × tool\nExample runtime: AWS Lambda"]
+            direction LR
+            BLD["Profile Builder\nExample runtime: AWS Lambda"]
+            BLD_N["<b>Component goal:</b> nightly batch aggregator\n<b>What it does:</b> compute p50/p90 per model × tool"]
         end
         subgraph L6F[" "]
-            direction TB
-            ART[("Shared Profile Store")]
-            ART_N["Storage goal: publish shared profiles\nWhat it stores: public p50/p90 artifacts\nExample path: s3://agentcost-profile-artifacts/"]
+            direction LR
+            ART[("Shared Profile Store\nExample path:\ns3://agentcost-profile-artifacts/")]
+            ART_N["<b>Storage goal:</b> publish shared profiles\n<b>What it stores:</b> public p50/p90 artifacts"]
         end
         subgraph L6G[" "]
-            direction TB
-            PUB["Community Profiles API"]
-            PUB_N["Component goal: serve cold-start fallback\nWhat it does: returns shared profiles\nExample route: GET /v1/community/profiles"]
+            direction LR
+            PUB["Community Profiles API\nExample route: GET /v1/community/profiles"]
+            PUB_N["<b>Component goal:</b> serve cold-start fallback\n<b>What it does:</b> return shared profiles to new SDK installs"]
         end
     end
 
@@ -183,10 +181,14 @@ flowchart TD
     class EXE_N,LOG_N,PRC_N note
     class SQ,PG sto
     class SQ_N,PG_N note
-    class PRF,PRD,BGD,CLI,DSH,GLOSS ana
-    class PRF_N,PRD_N,BGD_N,CLI_N,DSH_N,GLOSS_N note
+    class PRF,PRD,BGD,CLI,DSH ana
+    class PRF_N,PRD_N,BGD_N,CLI_N,DSH_N note
+    class GLOSS gloss
     class ANO,ING,QUE,ELK,BLD,ART,PUB cld
     class ANO_N,ING_N,QUE_N,ELK_N,BLD_N,ART_N,PUB_N note
+
+    %% ── Layer 6 container styling: cohesive data-lake subsystem ──
+    style L6 fill:#fff5f5,stroke:#dc2626,stroke-width:2px,color:#7f1d1d
 ```
 
 > _`predictor.py` lives in the public repo during M1–M4 (rule-based, fully local). Extracted to `agentcost-engine` at Phase 5 after M4 user validation. See [docs/05-architecture.md](docs/05-architecture.md) for the extraction plan._
