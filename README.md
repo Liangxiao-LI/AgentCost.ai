@@ -21,50 +21,65 @@ flowchart TD
     classDef sto  fill:#fef3c7,stroke:#d97706,color:#78350f
     classDef ana  fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
     classDef cld  fill:#fee2e2,stroke:#dc2626,color:#7f1d1d
+    classDef note fill:#f8fafc,stroke:#94a3b8,color:#334155,stroke-dasharray: 3 3
 
-    subgraph L1["LAYER 1  ·  Developer & Agent Runtime  ·  your existing environment"]
+    subgraph L1["LAYER 1 · Developer & Agent Runtime"]
         DEV(["👤 Developer / Agent Builder"])
-        AGENT["Existing AI Agent\nClaude Code · OpenAI Agents SDK\nCustom Python · LangChain / LlamaIndex"]
-        TOOLS["Agent Tool Calls\nweb_search · calculator\nMCP tools (Milestone 2+) · file_search (deferred)"]
+        AGENT["Existing AI Agent\nExample: Claude Code"]
+        TOOLS["Agent Tool Calls\nExample: web_search"]
     end
 
-    subgraph L2["LAYER 2  ·  SDK Instrumentation  ·  current OSS SDK  ·  1-line code change"]
+    subgraph L2["LAYER 2 · SDK Instrumentation · 1-line code change"]
         direction LR
         A1["acf/integrations/anthropic.py\nDrop-in Anthropic SDK wrapper"]
         A2["acf/integrations/openai.py\nDrop-in OpenAI SDK wrapper"]
-        A3["acf.patch()\nGlobal monkey-patch, zero code change"]
+        A3["acf.patch()\nGlobal monkey-patch"]
         A4["acf.track()\nPer-session context manager"]
     end
 
-    subgraph L3["LAYER 3  ·  Local Observability Core  ·  current OSS SDK"]
+    subgraph L3["LAYER 3 · Local Observability Core"]
         direction LR
-        EXE["executor.py  ·  Executor Wrapper\nCaptures per call: model · input/output/cache tokens\nlatency · finish_reason · source URLs · tool arguments"]
-        LOG["logger.py  ·  Event Logger\nNormalizes events into structured trace records\nComputes api_equivalent_cost_usd  (tokens × rate)\nAssigns trace_id · run_id · model_call_id · tool_call_id\nPrivacy: off · hash_only · redact_pii · synthetic_only"]
-        PRC["pricing.py  ·  Pricing Resolver\nPer-model token rates (per 1M tokens)\nSnapshots rate at log time — price-change safe\nbilling_mode: subscription vs API  ·  cost_basis labels"]
+        subgraph L3A[" "]
+            direction TB
+            EXE["executor.py"]
+            EXE_N["File goal: Executor Wrapper\nWhat it does: capture per call\nExample capture: input/output tokens"]
+        end
+        subgraph L3B[" "]
+            direction TB
+            LOG["logger.py"]
+            LOG_N["File goal: Event Logger\nWhat it does: normalize into traces\nExample compute: api_equivalent_cost_usd"]
+        end
+        subgraph L3C[" "]
+            direction TB
+            PRC["pricing.py"]
+            PRC_N["File goal: Pricing Resolver\nWhat it does: snapshot token rates\nExample rate: per-1M token price"]
+        end
     end
 
-    subgraph L4["LAYER 4  ·  Local Storage"]
+    subgraph L4["LAYER 4 · Local Storage"]
         direction LR
-        SQ[("SQLite  ~/.acf/acf.db\n✅ Recommended: local dev / OSS / zero infra\nagent_runs · model_calls · tool_calls\ntool_profiles · predictions · model_pricing · agent_configs")]
-        PG[("PostgreSQL  agentcost_engine_db\n⬜ Recommended: hosted / team / production\nIdentical schema · Postgres-compatible\nMigrate when: team use or more than 100k runs")]
+        SQ[("SQLite ~/.acf/acf.db\nRecommended: local dev / OSS\nExample table: agent_runs")]
+        PG[("PostgreSQL agentcost_engine_db\nRecommended: hosted / production\nMigrate when: team or >100k runs")]
     end
 
-    subgraph L5["LAYER 5  ·  Analytics, Profiling & Governance  ·  current OSS SDK"]
-        PRF["profiler.py  ·  Profiler\nBuilds empirical distributions from logged tool_calls\np50/p90: cost · latency · tokens  per model × tool × category\nCalibration: p90_coverage target ≥ 0.90  ·  underestimation_rate target ≤ 0.10"]
-        PRD["predictor.py  ·  Cost Predictor\nPre-run p50/p90 estimate · under 200 ms · no model call made\nToken est: fixed (tool schemas) + variable (P × E × result tokens)\nRule-based router now → embedding + ML router at Phase 5\nOutputs: prediction_id · p50/p90 USD · cost drivers · optimization hints"]
-        BGD["Budget Guard  [inside predictor.py]\nsafe: p90 below budget  ·  warning: p50 ok but p90 near limit\nblocked: p90 exceeds limit  ·  unknown: no profile data yet\nshould_execute boolean  ·  project / run / per-tool constraints"]
-        CLI["acf CLI\nrun · run-batch · predict · profiles · trace\ncalibration · suggest-tools · compare · sources · export"]
-        DSH["Optional Dashboard  [future]\nSpend over time · trace viewer · budget status\nModel / tool cost comparison\nStreamlit MVP  →  Next.js production"]
+    subgraph L5["LAYER 5 · Analytics, Profiling & Governance"]
+        direction LR
+        PRF["profiler.py · Profiler\nBuilds empirical p50/p90 distributions\nExample metric: cost per model × tool"]
+        PRD["predictor.py · Cost Predictor\nPre-run p50/p90 estimate, under 200 ms\nExample output: prediction_id + p90 USD"]
+        BGD["Budget Guard (inside predictor.py)\nGates execution against p90 limit\nExample status: blocked"]
+        CLI["acf CLI\nUser-facing commands\nExample: acf predict"]
+        DSH["Optional Dashboard (future)\nSpend over time + trace viewer\nExample stack: Streamlit MVP"]
     end
 
-    subgraph L6["LAYER 6  ·  Community Benchmarking  ·  optional · future Phase 5+ · opt-in only"]
-        ANO["acf/sync/  ·  Anonymized Sync Client\nUPLOADS ONLY: token counts · model · tool names · domains · cost · prompt hash\nNEVER UPLOADS: raw prompts · raw outputs · full source URLs · secrets\nDry-run during MVP Weeks 1–5"]
-        ING["Ingestion API  [agentcost-engine · private repo]\nFastAPI + API Gateway / Lambda\nPOST /v1/ingest  (contributor token auth)"]
-        QUE["Buffer Queue\nAWS SQS / Kinesis Firehose"]
-        ELK[("Raw Event Lake\ns3://agentcost-community-logs/\nAnonymized JSONL / Parquet  ·  admin-only read\nAWS Glue Data Catalog + Athena for SQL queries")]
-        BLD["Profile Builder  [nightly batch]\nAWS Lambda / ECS Fargate / Step Functions\nAggregates p50/p90 per model × tool × category"]
-        ART[("Shared Profile Store\ns3://agentcost-profile-artifacts/\np50/p90 aggregates per model × tool  ·  public read")]
-        PUB["Community Profiles API\nGET /v1/community/profiles\nPublic p50/p90 aggregates\nCold-start fallback for new SDK installs"]
+    subgraph L6["LAYER 6 · Community Benchmarking (opt-in, future)"]
+        direction LR
+        ANO["acf/sync/ · Anonymized Sync Client\nUploads aggregates only — never raw text\nExample upload: token counts"]
+        ING["Ingestion API (private repo)\nFastAPI receiver, token-auth\nExample: POST /v1/ingest"]
+        QUE["Buffer Queue\nExample: AWS SQS"]
+        ELK[("Raw Event Lake\nAnonymized Parquet, admin-only read\nExample: s3://agentcost-community-logs/")]
+        BLD["Profile Builder (nightly batch)\nAggregates p50/p90 per model × tool\nExample runtime: AWS Lambda"]
+        ART[("Shared Profile Store\nPublic p50/p90 artifacts\nExample: s3://agentcost-profile-artifacts/")]
+        PUB["Community Profiles API\nServes cold-start fallback profiles\nExample: GET /v1/community/profiles"]
     end
 
     %% ── Flows 1–3: agent runs, calls tools, SDK intercepts ──
@@ -98,11 +113,13 @@ flowchart TD
     ING -.-> QUE -.-> ELK
     ELK -.->|"⑪ nightly aggregate build"| BLD
     BLD -.-> ART -.-> PUB
-    PUB -.->|"⑫ download cold-start profiles on startup"| SQ
+    PUB -.->|"⑫ download cold-start profiles"| SQ
 
     %% ── Color assignments ──
     class DEV,AGENT,TOOLS rt
-    class A1,A2,A3,A4,EXE,LOG,PRC sdk
+    class A1,A2,A3,A4 sdk
+    class EXE,LOG,PRC sdk
+    class EXE_N,LOG_N,PRC_N note
     class SQ,PG sto
     class PRF,PRD,BGD,CLI,DSH ana
     class ANO,ING,QUE,ELK,BLD,ART,PUB cld
