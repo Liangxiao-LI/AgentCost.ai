@@ -9,7 +9,17 @@
       "Bash(.venv/bin/python -m py_compile app/db.py app/pricing.py app/tool_registry.py app/logger.py app/executor.py app/cli.py)",
       "Bash(.venv/bin/pip show *)",
       "Bash(.venv/bin/python -c \"import anthropic; print\\('anthropic', anthropic.__version__\\)\")",
-      "Bash(.venv/bin/python -c \"import anthropic, tiktoken, yaml, duckduckgo_search, rich; print\\('All imports OK'\\)\")"
+      "Bash(.venv/bin/python -c \"import anthropic, tiktoken, yaml, duckduckgo_search, rich; print\\('All imports OK'\\)\")",
+      "Bash(find /Users/leon/.claude -type f 2>/dev/null | head -20)",
+      "Read(//Users/leon/.claude/**)",
+      "Bash(find /Users/leon -name \"CLAUDE.md\" 2>/dev/null)",
+      "Read(//Users/leon/**)",
+      "Bash(claude --version)",
+      "Bash(python3 -c \"import anthropic; print\\(anthropic.__file__\\)\")",
+      "WebSearch",
+      "WebFetch(domain:gist.github.com)",
+      "WebFetch(domain:claude-dev.tools)",
+      "WebFetch(domain:support.claude.com)"
     ]
   }
 }
