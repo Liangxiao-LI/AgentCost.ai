@@ -55,6 +55,31 @@ Each MVP module consolidates several full-system modules. When the product grows
 | `logger.py` | `run_logger` + database write operations |
 | `profiler.py` | `cost_profiler` + `calibration` + profile updates |
 
+## Two-Repo Strategy
+
+The codebase splits into two repositories. The split happens **after M4 user validation**, not during the MVP.
+
+**Public repo — `AgentCost.ai` (this repo)**
+Open-source SDK. Everything users install to instrument their agents and contribute data.
+- `acf/integrations/`, `auto_config.py`, `acf/sync/` — drop-in SDK and community sync
+- `executor.py`, `logger.py`, `db.py`, `pricing.py`, `tool_registry.py`, `profiler.py` — data collection
+- `scripts/`, `data/` — batch tooling and seed templates
+- CLI: `acf run`, `run-batch`, `profiles`, `trace`, `sources`, `sync`, `contributor`, `community`, `export`
+- **During M1–M4:** also contains `predictor.py` running fully locally (rule-based only, no ML IP)
+
+**Private repo — `agentcost-engine`**
+Closed-source prediction engine and community server. Created at Phase 5.
+- `predictor.py` (extracted from public repo at Phase 5 kickoff)
+- Community ingestion API (FastAPI), data lake, nightly profile recompute
+- ML router: embedding similarity (Phase 5), supervised classifier (Phase 8)
+- Web dashboard, pipeline API
+
+**The extraction trigger:** after M4 user interviews confirm the prediction approach is worth protecting, `predictor.py` moves to `agentcost-engine` and is exposed as `POST /v1/predict`. The public SDK's `acf predict` CLI calls the hosted API by default and falls back to a minimal local rule-based predictor if no API key is set.
+
+Keep internal function boundaries clean in `predictor.py` during the MVP so the extraction becomes a move, not a rewrite.
+
+---
+
 ## SQLite First
 
 Do not start with Postgres unless there are real users, high concurrency, or more than 100k logged runs. SQLite requires zero infrastructure, is trivial to back up, easy to inspect locally, and exports cleanly to CSV / JSONL / Parquet. Keep the schema compatible with a future Postgres migration by avoiding SQLite-specific types.

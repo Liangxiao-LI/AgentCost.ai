@@ -73,7 +73,14 @@ FastAPI, Postgres, async queue, embedding router, supervised classifier, LLM-ass
 
 After the six-week MVP is validated with real users or real execution data:
 
-### Phase 5 — Community Profile Server + Smarter Routing
+### Phase 5 — Community Profile Server + Smarter Routing + Repo Split
+
+**Repo split (first task of Phase 5):**
+Create the private `agentcost-engine` repo and extract `predictor.py` from the public SDK. Expose prediction as `POST /v1/predict`. Update `acf predict` CLI to call the hosted API with local rule-based fallback for offline use. See AGE-46 for the full migration steps.
+
+Everything in Phase 5+ (ingestion API, data lake, ML router, dashboard) lives in `agentcost-engine`. The public `AgentCost.ai` repo remains the open-source SDK for data collection and local profiling.
+
+---
 
 **Community network (go live):**
 - Deploy ingestion API (FastAPI + contributor token auth)

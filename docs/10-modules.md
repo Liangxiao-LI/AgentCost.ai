@@ -56,6 +56,8 @@ Key methods: `register()`, `get()`, `list_enabled()`, `registry_hash()`.
 
 ## 2. `predictor.py` *(MVP — covers router_predictor + token_estimator + price_estimator + budget_guard)*
 
+**Repo:** `public` during M1–M4. Extracted to `agentcost-engine` (private repo) at Phase 5 kickoff (AGE-46). Keep internal function boundaries clean so the move is a copy, not a rewrite.
+
 **Purpose:** Predict tool calls, estimate token usage, compute API-equivalent cost, and apply the budget guard. Split into separate modules in Phase 5.
 
 **Router layer** — three-layer hybrid; use only what is available:

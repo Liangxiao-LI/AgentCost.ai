@@ -19,7 +19,10 @@
       "WebSearch",
       "WebFetch(domain:gist.github.com)",
       "WebFetch(domain:claude-dev.tools)",
-      "WebFetch(domain:support.claude.com)"
+      "WebFetch(domain:support.claude.com)",
+      "mcp__linear-server__save_milestone",
+      "mcp__linear-server__save_issue",
+      "mcp__linear-server__create_issue_label"
     ]
   }
 }
