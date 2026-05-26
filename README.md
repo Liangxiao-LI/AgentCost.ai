@@ -1,10 +1,67 @@
 # Agent Cost Forecaster
 
+> **Know what your AI agent will cost — before it runs.**
+
 A logging-first cost profiler and budget guard for tool-using AI agents.
 
-Agent Cost Forecaster instruments a real agent, observes every model call and tool call, and builds empirical p50/p90 cost profiles from those logs. Once enough runs are collected, those profiles power pre-execution cost predictions and a per-run budget guard.
+---
 
-The system is self-improving: every execution feeds back into the profiling and calibration loop.
+## Architecture
+
+```mermaid
+flowchart TD
+    AGENT(["🤖  Your Agent\nClaude · GPT-4 · Gemini  +  tools"])
+
+    subgraph SDK["🟢  Public SDK — this repo  (open source)"]
+        direction LR
+        S1["**① Log**\n`acf run`\ncaptures every token,\ntool call & source URL"]
+        S2["**② Profile**\n`acf profiles --update`\nbuilds p50 / p90 per\ntool & prompt category"]
+        S3["**③ Predict**\n`acf predict`\ncost estimate + budget guard\nbefore the agent runs"]
+        S4["**④ Validate**\n`acf calibration`\np90_coverage ≥ 0.90\nunderestimation_rate ≤ 0.10"]
+        S1 --> S2 --> S3 --> S4
+        S4 -->|"more data → better profiles"| S1
+    end
+
+    subgraph NET["🟣  Community Network — private engine  (Phase 5+)"]
+        direction LR
+        SYNC["anonymize + upload\ntoken counts · model · tool names\nno raw text, ever"]
+        LAKE[("community\ndata lake")]
+        COLD["community profiles\nbetter cold-start predictions\nfor every contributor"]
+    end
+
+    AGENT -->|"instrument — 1 line"| SDK
+    SDK  -->|"opt-in sync  ·  dry-run during MVP"| SYNC
+    SYNC --> LAKE --> COLD -->|"shared p50/p90\ndownloaded on startup"| SDK
+```
+
+**How it works in 30 seconds:**
+1. Wrap your agent with one line — `acf.patch()` or import `acf/integrations/anthropic.py`
+2. Run `acf run` to log a prompt; it captures every token count, tool call, and source URL
+3. Run `acf profiles --update` to build empirical p50/p90 cost distributions from your logs
+4. Run `acf predict` to get a cost estimate and budget decision *before* your agent executes
+5. Every run feeds back into the loop — predictions get more accurate over time
+6. Opt-in sync shares your anonymized token stats with the community, improving cold-start predictions for everyone
+
+**Two-repo structure:**
+| Repo | What | Who can contribute |
+|---|---|---|
+| `AgentCost.ai` (this repo) | Open-source SDK: logging, profiling, sync, CLI | Anyone |
+| `agentcost-engine` (private, Phase 5+) | Prediction engine, ML router, community server | Core team |
+
+---
+
+## How to Contribute
+
+**The most valuable contribution: run the SDK.**
+Every batch you run adds real execution data. Your anonymized token statistics (never raw text or prompts) flow to the community data lake and improve shared p50/p90 profiles for all tools — making cold-start predictions better for every new contributor.
+
+**Code contributions (this repo):**
+- `data/seed_templates.yaml` — add diverse prompts across `web_search`, `calculator`, `no_tool`, `ambiguous`
+- `acf/integrations/` — add wrappers for new SDKs (OpenAI, Gemini, Mistral)
+- `profiler.py` — improve p50/p90 profile computation or add new metrics
+- `acf/sync/anonymizer.py` — strengthen privacy guarantees
+
+Open an issue before starting any significant change.
 
 ---
 
